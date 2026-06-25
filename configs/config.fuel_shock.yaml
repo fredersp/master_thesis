@@ -3,11 +3,13 @@ network_file: data/networks/base_s_10_elec_.nc
 solver: "gurobi"
 
 scenarios:
+  
   BASE:
-    fuels: ['CCGT', 'OCGT']
+    fuels: []
     shock_factor: 1.0
+    duration: 0
 
   GAS_150_30D:
-    fuels: ['CCGT', 'OCGT']
+    fuels: ['CCGT']
     shock_factor: 1.5
     duration: 30

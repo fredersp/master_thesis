@@ -32,21 +32,42 @@ if __name__ == "__main__":
                 (n.snapshots >= start) & (n.snapshots < end)
                 ]
             
+            marginal_cost_t = n.generators_t.marginal_cost
+
             # Make sure time-dependent marginal_cost exists
             if n.generators_t.marginal_cost.empty:
                 n.generators_t.marginal_cost = pd.DataFrame(index=n.snapshots)
             
-            # Add baseline marginal costs for affected generators
-            for generator in affected_generators:
-                if generator not in n.generators_t.marginal_cost.columns:
-                    n.generators_t.marginal_cost[generator] = n.generators.loc[
-                        generator, "marginal_cost"
-                    ]
 
-            # Apply shock only during selected snapshots
-            n.generators_t.marginal_cost.loc[
+            # Find affected generators that are missing as time-dependent columns
+            missing_generators = affected_generators.difference(marginal_cost_t.columns)
+
+            if len(missing_generators) > 0:
+                # Create all missing columns at once
+                missing_costs = pd.DataFrame(
+                    {
+                        generator: n.generators.loc[generator, "marginal_cost"]
+                        for generator in missing_generators
+                    },
+                    index=n.snapshots,
+                )
+
+                marginal_cost_t = pd.concat(
+                    [marginal_cost_t, missing_costs],
+                    axis=1,
+                )
+
+            # Defragment dataframe
+            marginal_cost_t = marginal_cost_t.copy()
+
+            # Apply shock only to affected generators and affected snapshots
+            marginal_cost_t.loc[
                 shock_snapshots, affected_generators
             ] *= shock_factor
+
+            # Put it back into the network
+            n.generators_t.marginal_cost = marginal_cost_t
+
 
 
     n.export_to_netcdf(snakemake.output.net)
