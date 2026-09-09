@@ -1,0 +1,94 @@
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+#
+# SPDX-License-Identifier: CC0-1.0
+
+#tutorial: true
+
+
+run:
+  name: "elec_dk_wN_1y_c10_noEx_wBattery_24H_Ep100" # use this to keep track of runs with different settings
+  disable_progressbar: true
+  shared_resources:
+    policy: false
+  shared_cutouts: true
+
+scenario:
+  clusters:
+  - 10
+  opts:
+  - ''
+  planning_horizons:
+  - 2025 # setting horizon to 2025
+
+countries: ['NL', 'DE', 'DK', 'SE', 'NO', 'FI', 'GB'] # included countries
+
+snapshots:
+  start: "2013-01-01"
+  end: "2013-12-31"
+
+electricity:
+
+  #custom_powerplants: true # Include custom powerplants from the CSV file
+  
+  extendable_carriers:
+    Generator: [] 
+    StorageUnit: [battery]
+    Store: []
+    Link: []
+
+  renewable_carriers: [solar, solar-hsat, onwind, offwind-ac, offwind-dc, offwind-float, hydro] #adding hydro
+  
+  estimate_renewable_capacities:
+    enable: true
+    from_gem: true
+    year: 2020
+    expansion_limit: false
+    technology_mapping:
+      Offshore: offwind-ac
+      Onshore: onwind
+      PV: solar
+  
+  transmission_limit: v1.0 #cannot expand transmission capacity
+
+atlite:
+  default_cutout: europe-2013-sarah3-era5
+  cutouts:
+    europe-2013-sarah3-era5:
+      module: era5
+      x: [-12., 32.0]
+      y: [47.0, 72.0] 
+      time: ["2013-01-01", "2013-12-31"]
+costs:
+  emission_prices:
+    enable: true
+    co2: 100.0
+
+renewable:
+  offwind-ac:
+    max_depth: false
+  offwind-dc:
+    max_depth: false
+  offwind-float:
+    max_depth: false
+    min_depth: false
+
+
+clustering:
+  exclude_carriers: ["OCGT", "offwind-ac", "coal"]
+  temporal:
+    resolution_elec: 24H
+
+lines:
+  dynamic_line_rating:
+    activate: false
+
+
+solving:
+  tmpdir: '/tmp'
+
+  solver:
+    name: gurobi
+
+  check_objective:
+    enable: false
+    expected_value: 3.8120188094e+07
