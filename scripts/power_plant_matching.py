@@ -194,9 +194,7 @@ def normalize_postcode(series):
 
 def main():
 
-    # ------------------------------------------------------------------
     # Load data
-    # ------------------------------------------------------------------
 
     power_plants = pd.read_csv(
         DATA_DIR / "ENS_power_plant_register.csv",
