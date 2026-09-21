@@ -439,6 +439,13 @@ def main():
         .map(TECHNOLOGY_MAPPING)
     )
 
+    # If the technology is CCGT or OCGT and the fuel type is not Natural Gas, then set Technology to steam turbine
+    df_pp["anlaegstype_navn"] = np.where(
+        (df_pp["anlaegstype_navn"].isin(["CCGT", "OCGT"]))
+        & (df_pp["Hovedbrændselsgruppe"] != "natural gas"),
+        "Steam Turbine",
+        df_pp["anlaegstype_navn"],
+    )
 
     # ------------------------------------------------------------------
     # Process wind and solar
