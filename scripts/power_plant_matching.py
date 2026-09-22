@@ -422,6 +422,11 @@ def main():
         "PP",
     )
 
+    df_pp = df_pp.loc[
+        df_pp["Set"].eq("PP")
+    ].copy()
+    df_pp["Set"] = "PP"
+
 
     # Map fuel types
 
@@ -871,7 +876,7 @@ def main():
                 ],
 
             "Set":
-                df_pp["Set"],
+                df_pp["Set"].astype(str),
 
             "Country":
                 "Denmark",
