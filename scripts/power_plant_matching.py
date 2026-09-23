@@ -40,6 +40,18 @@ TECHNOLOGY_MAPPING = {
 }
 
 
+# Carrier naming used in the existing CHP/heat capacity dataset
+CARRIER_MAPPING = {
+    "Natural Gas": "gas",
+    "Oil": "oil",
+    "Solid Biomass": "solid biomass",
+    "Biogas": "biogas",
+    "Waste": "waste",
+    "Hydro": "hydro",
+    "Hard Coal": "coal",
+}
+
+
 # ------------------------------------------------------------------
 # Manually specified offshore wind farm coordinates
 #
@@ -167,6 +179,19 @@ def postcode_to_coords(postcode):
         "latitude": centroid.y,
     }
 
+def postcode_to_zone(postcode):
+    """
+    Returns either DK1 or DK0 depending on the postcode.
+    """
+    
+    postcode = str(postcode).strip()
+    
+    if int(postcode) > 4999:
+        return {'node': 'DK1'}
+    else:
+        return {'node': 'DK0'}
+    
+    
 
 def normalize_postcode(series):
     """
@@ -1041,6 +1066,137 @@ def main():
 
     df_ppm["id"] = (
         df_ppm.index
+    )
+
+    
+    # ------------------------------------------------------------------
+    # New CHP and Heat plant dataset
+    #
+    # Only plants connected to district heating (non-empty fv_net) are
+    # included. Conventional fuels are classified as CHP (power and
+    # heat capacity both > 0) or heat only. Electricity-driven heat
+    # sources are classified as heat pump, with carrier air/ground for
+    # heat pumps and ac for resistive heaters.
+    # ------------------------------------------------------------------
+    df_chp_heat = power_plants.loc[active_power_plants].copy()
+
+    # Only plants connected to a district heating network
+    df_chp_heat = df_chp_heat.loc[
+        df_chp_heat["fv_net"].notna()
+        & df_chp_heat["fv_net"].astype(str).str.strip().ne("")
+    ].copy()
+
+    df_chp_heat["vaerk_postnr"] = normalize_postcode(
+        df_chp_heat["vaerk_postnr"]
+    )
+
+    # Drop plants without a postcode, since a node cannot be assigned
+    df_chp_heat = df_chp_heat.loc[
+        df_chp_heat["vaerk_postnr"].notna()
+    ].copy()
+
+    df_chp_heat["node"] = df_chp_heat["vaerk_postnr"].map(
+        lambda p: postcode_to_zone(p)["node"] + " 0AC"
+    )
+
+    df_chp_heat["fuel_lower"] = (
+        df_chp_heat["Hovedbrændselsgruppe"]
+        .str.strip()
+        .str.lower()
+    )
+
+    df_chp_heat["tech_lower"] = (
+        df_chp_heat["anlaegstype_navn"]
+        .str.strip()
+        .str.lower()
+    )
+
+    def classify_electric_heat(fuel, tech):
+        """Return (carrier, set) for heat pumps / resistive heaters, else None."""
+
+        if fuel == "elektricitet" and tech == "elpatron":
+            return ("ac", "heat only")
+
+        if "varmepumpe" in tech:
+            if "luft" in tech:
+                return ("air", "heat pump")
+            return ("ground", "heat pump")
+
+        return None
+
+    electric_heat = df_chp_heat.apply(
+        lambda row: classify_electric_heat(
+            row["fuel_lower"], row["tech_lower"]
+        ),
+        axis=1,
+    )
+    is_electric_heat = electric_heat.notna()
+
+    # Conventional fuels: classify as CHP or heat only
+    df_conventional = df_chp_heat.loc[~is_electric_heat].copy()
+
+    df_conventional = df_conventional.loc[
+        df_conventional["varmekapacitet_MW"].fillna(0) > 0
+    ].copy()
+
+    df_conventional["carrier"] = (
+        df_conventional["fuel_lower"]
+        .map(FUELTYPE_MAPPING)
+        .map(CARRIER_MAPPING)
+        .replace("biogas", "solid biomass")
+    )
+
+    df_conventional["set"] = np.where(
+        (df_conventional["elkapacitet_MW"].fillna(0) > 0)
+        & (df_conventional["varmekapacitet_MW"].fillna(0) > 0),
+        "CHP",
+        "heat only",
+    )
+
+    # Heat pumps / resistive heaters: no separate power capacity
+    df_electric = df_chp_heat.loc[is_electric_heat].copy()
+
+    df_electric = df_electric.loc[
+        df_electric["varmekapacitet_MW"].fillna(0) > 0
+    ].copy()
+
+    electric_classification = electric_heat.loc[is_electric_heat]
+    df_electric["carrier"] = electric_classification.map(lambda x: x[0])
+    df_electric["set"] = electric_classification.map(lambda x: x[1])
+    df_electric["elkapacitet_MW"] = np.nan
+
+    df_chp_heat = pd.concat(
+        [df_conventional, df_electric],
+        ignore_index=True,
+    )
+
+    existing_chp_heat = (
+        df_chp_heat
+        .groupby(["node", "carrier", "set"], as_index=False)
+        .agg(
+            power_capacity=(
+                "elkapacitet_MW",
+                lambda s: s.sum(min_count=1),
+            ),
+            heating_capacity=("varmekapacitet_MW", "sum"),
+        )
+        .sort_values(["node", "carrier", "set"])
+        .reset_index(drop=True)
+    )
+
+    chp_heat_output_path = (
+        DATA_DIR
+        / "existing_chp_heat_capacitites.csv"
+    )
+
+    existing_chp_heat.to_csv(
+        chp_heat_output_path,
+        index=False,
+    )
+
+    print(
+        f"\nSaved CHP/heat dataset to: "
+        f"{chp_heat_output_path}"
     )
 
 
