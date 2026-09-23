@@ -1074,9 +1074,10 @@ def main():
     #
     # Only plants connected to district heating (non-empty fv_net) are
     # included. Conventional fuels are classified as CHP (power and
-    # heat capacity both > 0) or heat only. Electricity-driven heat
-    # sources are classified as heat pump, with carrier air/ground for
-    # heat pumps and ac for resistive heaters.
+    # heat capacity both > 0) or heat only. Solar thermal plants and
+    # electricity-driven heat sources are classified separately. Heat
+    # pumps use heat vent, air, or ground as their carrier, while
+    # resistive heaters use ac.
     # ------------------------------------------------------------------
     df_chp_heat = power_plants.loc[active_power_plants].copy()
 
@@ -1112,15 +1113,21 @@ def main():
     )
 
     def classify_electric_heat(fuel, tech):
-        """Return (carrier, set) for heat pumps / resistive heaters, else None."""
+        """Return (carrier, set) for electric heat technologies, else None."""
 
         if fuel == "elektricitet" and tech == "elpatron":
             return ("ac", "resistive heater")
 
         if "varmepumpe" in tech:
-            if "luft" in tech:
-                return ("air", "heat pump")
-            return ("ground", "heat pump")
+            return ("air", "heat pump")
+            
+        return None
+
+    def classify_solar_thermal(fuel, tech):
+        """Return the carrier and set for solar thermal plants, else None."""
+
+        if fuel == "solenergi" or tech == "solvarme":
+            return ("solar thermal", "solar thermal")
 
         return None
 
@@ -1132,8 +1139,18 @@ def main():
     )
     is_electric_heat = electric_heat.notna()
 
+    solar_thermal = df_chp_heat.apply(
+        lambda row: classify_solar_thermal(
+            row["fuel_lower"], row["tech_lower"]
+        ),
+        axis=1,
+    )
+    is_solar_thermal = solar_thermal.notna()
+
     # Conventional fuels: classify as CHP or heat only
-    df_conventional = df_chp_heat.loc[~is_electric_heat].copy()
+    df_conventional = df_chp_heat.loc[
+        ~is_electric_heat & ~is_solar_thermal
+    ].copy()
 
     df_conventional = df_conventional.loc[
         df_conventional["varmekapacitet_MW"].fillna(0) > 0
@@ -1165,8 +1182,24 @@ def main():
     df_electric["set"] = electric_classification.map(lambda x: x[1])
     df_electric["elkapacitet_MW"] = np.nan
 
+    # Solar thermal plants: heat capacity only
+    df_solar_thermal = df_chp_heat.loc[is_solar_thermal].copy()
+
+    df_solar_thermal = df_solar_thermal.loc[
+        df_solar_thermal["varmekapacitet_MW"].fillna(0) > 0
+    ].copy()
+
+    solar_thermal_classification = solar_thermal.loc[is_solar_thermal]
+    df_solar_thermal["carrier"] = solar_thermal_classification.map(
+        lambda x: x[0]
+    )
+    df_solar_thermal["set"] = solar_thermal_classification.map(
+        lambda x: x[1]
+    )
+    df_solar_thermal["elkapacitet_MW"] = np.nan
+
     df_chp_heat = pd.concat(
-        [df_conventional, df_electric],
+        [df_conventional, df_electric, df_solar_thermal],
         ignore_index=True,
     )
 
