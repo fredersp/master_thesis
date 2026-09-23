@@ -1115,7 +1115,7 @@ def main():
         """Return (carrier, set) for heat pumps / resistive heaters, else None."""
 
         if fuel == "elektricitet" and tech == "elpatron":
-            return ("ac", "heat only")
+            return ("ac", "resistive heater")
 
         if "varmepumpe" in tech:
             if "luft" in tech:
@@ -1150,7 +1150,7 @@ def main():
         (df_conventional["elkapacitet_MW"].fillna(0) > 0)
         & (df_conventional["varmekapacitet_MW"].fillna(0) > 0),
         "CHP",
-        "heat only",
+        "boiler",
     )
 
     # Heat pumps / resistive heaters: no separate power capacity
