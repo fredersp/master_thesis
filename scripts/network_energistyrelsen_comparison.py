@@ -135,7 +135,7 @@ def plot_power_comparison(df_ens_power, df_ens_heat, network, zone='DK0'):
     
     # Compare electrical capacity only; heat-bus outputs are thermal capacity.
     power_buses = network.buses.index[
-        network.buses.carrier.str.contains("AC|DC|electricity|power|bev", case=False, na=False)
+        network.buses.carrier.str.contains("AC|DC|electricity|power|bev|low voltage", case=False, na=False)
         & network.buses.index.to_series().str.contains(zone, case=False, na=False).to_numpy()
     ]
     
@@ -266,7 +266,7 @@ if __name__ == "__main__":
     df_ens_heat = pd.read_csv(DATA_DIR / "existing_chp_heat_capacitites.csv")
 
     # Load network
-    network = pypsa.Network(NET_DIR / "dk_se_n3_upd_PPM.nc") 
+    network = pypsa.Network(NET_DIR / "sector_w_co2_price.nc") 
     
     # add a column 'zone' based on the coordinates
     df_ens_power['zone'] = df_ens_power.apply(lambda row: coords_to_zone(row['lat'], row['lon']), axis=1)
