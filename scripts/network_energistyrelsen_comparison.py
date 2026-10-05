@@ -49,7 +49,6 @@ HEAT_CARRIER_MAPPING = {
     ("solar thermal", "solar thermal"): "urban central solar thermal",
 }
 
-
 def coords_to_zone(lat, lon):
     """
     Approximate mapping to:
@@ -111,8 +110,6 @@ def coords_to_zone(lat, lon):
         return "DK1"
 
     return "DK0"
-
-
 
 
 def plot_power_comparison(df_ens_power, df_ens_heat, network, zone='DK0'):
@@ -243,8 +240,7 @@ def plot_heat_comparison(df_ens_heat, network, zone='DK0'):
     
     
     
-    
-    
+
     
     
 
@@ -266,11 +262,18 @@ if __name__ == "__main__":
     df_ens_heat = pd.read_csv(DATA_DIR / "existing_chp_heat_capacitites.csv")
 
     # Load network
-    network = pypsa.Network(NET_DIR / "sector_w_co2_price.nc") 
+    network = pypsa.Network(NET_DIR / "sector_dk_se_co2_100.nc") 
     
     # add a column 'zone' based on the coordinates
     df_ens_power['zone'] = df_ens_power.apply(lambda row: coords_to_zone(row['lat'], row['lon']), axis=1)
         
+    
+    
+    color_palette = network.carriers.color
+    
+    
+    
+    
     
     
     plot_power_comparison(df_ens_power, df_ens_heat, network, zone='DK0')
