@@ -262,7 +262,7 @@ if __name__ == "__main__":
     df_ens_heat = pd.read_csv(DATA_DIR / "existing_chp_heat_capacitites.csv")
 
     # Load network
-    network = pypsa.Network(NET_DIR / "sector_dk_se_co2_100.nc") 
+    network = pypsa.Network(NET_DIR / "sector_w_rural_final.nc") 
     
     # add a column 'zone' based on the coordinates
     df_ens_power['zone'] = df_ens_power.apply(lambda row: coords_to_zone(row['lat'], row['lon']), axis=1)

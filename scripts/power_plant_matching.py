@@ -11,6 +11,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
 
 END_2025 = pd.Timestamp("2025-12-31")
+PV_CAPACITY_THRESHOLD_KW = 6
 
 
 # ------------------------------------------------------------------
@@ -179,20 +180,6 @@ def postcode_to_coords(postcode):
         "latitude": centroid.y,
     }
 
-def postcode_to_zone(postcode):
-    """
-    Returns either DK1 or DK0 depending on the postcode.
-    """
-    
-    postcode = str(postcode).strip()
-    
-    if int(postcode) > 4999:
-        return {'node': 'DK1'}
-    else:
-        return {'node': 'DK0'}
-    
-    
-
 def normalize_postcode(series):
     """
     Convert Danish postcodes to four-character strings.
@@ -211,6 +198,86 @@ def normalize_postcode(series):
         .astype("string")
         .str.zfill(4)
     )
+
+
+def postcode_to_node(postcode):
+    """Return the Danish electricity node for a normalized postcode."""
+    zone = "DK1" if int(postcode) > 4999 else "DK0"
+    return f"{zone} 0AC"
+
+
+def compare_wind_solar_outputs(
+    wind_and_solar,
+    active_wind_solar,
+    powerplants_path,
+    small_pv_path,
+):
+    """Compare active ENS wind/PV capacity with the generated CSV outputs."""
+    raw = wind_and_solar.loc[active_wind_solar].copy()
+    powerplants = pd.read_csv(powerplants_path)
+    small_pv = pd.read_csv(small_pv_path)
+
+    powerplant_wind = powerplants.loc[
+        (powerplants["Country"] == "Denmark")
+        & (powerplants["Fueltype"] == "Wind")
+    ]
+    powerplant_large_pv = powerplants.loc[
+        (powerplants["Country"] == "Denmark")
+        & (powerplants["Fueltype"] == "Solar")
+        & (powerplants["Technology"] == "PV")
+    ]
+
+    comparisons = [
+        (
+            "Wind",
+            raw["Kategori"].ne("Solcelle"),
+            powerplant_wind,
+            powerplant_wind["Capacity"].sum(),
+        ),
+        (
+            f"PV > {PV_CAPACITY_THRESHOLD_KW} kW",
+            raw["Kategori"].eq("Solcelle")
+            & raw["InstalleretkW"].gt(PV_CAPACITY_THRESHOLD_KW),
+            powerplant_large_pv,
+            powerplant_large_pv["Capacity"].sum(),
+        ),
+        (
+            f"PV <= {PV_CAPACITY_THRESHOLD_KW} kW",
+            raw["Kategori"].eq("Solcelle")
+            & raw["InstalleretkW"].le(PV_CAPACITY_THRESHOLD_KW),
+            small_pv,
+            small_pv["capacity"].sum(),
+        ),
+    ]
+
+    print("\nWind and PV capacity assignment check")
+    print(
+        f"{'Category':<18} {'Raw installations':>18} "
+        f"{'Raw MW':>12} {'CSV rows':>10} "
+        f"{'Assigned MW':>14} {'Unassigned MW':>15}"
+    )
+
+    for category, raw_mask, output, assigned_capacity in comparisons:
+        raw_category = raw.loc[raw_mask]
+        raw_capacity = raw_category["InstalleretkW"].sum() / 1000
+        unassigned_capacity = raw_capacity - assigned_capacity
+        if abs(unassigned_capacity) < 0.0005:
+            unassigned_capacity = 0.0
+
+        print(
+            f"{category:<18} {len(raw_category):>18,} "
+            f"{raw_capacity:>12.3f} {len(output):>10,} "
+            f"{assigned_capacity:>14.3f} {unassigned_capacity:>15.3f}"
+        )
+
+        missing_capacity_count = int(
+            raw_category["InstalleretkW"].isna().sum()
+        )
+        if missing_capacity_count:
+            print(
+                f"  {missing_capacity_count:,} raw installations have "
+                "no capacity and are excluded from the MW comparison."
+            )
 
 
 # ------------------------------------------------------------------
@@ -526,6 +593,38 @@ def main():
 
 
     df_w_pv["Set"] = "PP"
+
+    # Aggregate small PV installations by electricity node, in MW.
+    small_pv = df_w_pv.loc[
+        (df_w_pv["Kategori"] == "Solar")
+        & (df_w_pv["InstalleretkW"] <= PV_CAPACITY_THRESHOLD_KW)
+    ].copy()
+
+    if small_pv["Postnr."].isna().any():
+        missing_postcodes = int(small_pv["Postnr."].isna().sum())
+        raise ValueError(
+            f"Cannot assign {missing_postcodes} small PV installations "
+            "to electricity nodes because their postcodes are missing."
+        )
+
+    small_pv["node"] = small_pv["Postnr."].map(postcode_to_node)
+    small_pv_by_node = (
+        small_pv.groupby("node", as_index=False)
+        .agg(capacity=("InstalleretkW", "sum"))
+        .sort_values("node")
+        .reset_index(drop=True)
+    )
+    small_pv_by_node["capacity"] /= 1000
+
+    small_pv_output_path = DATA_DIR / "existing_small_pv_capacity.csv"
+    small_pv_by_node.to_csv(small_pv_output_path, index=False)
+    print(f"\nSaved small PV capacity dataset to: {small_pv_output_path}")
+
+    # Keep wind installations and only larger PV installations in powerplants.csv.
+    df_w_pv = df_w_pv.loc[
+        (df_w_pv["Kategori"] != "Solar")
+        | (df_w_pv["InstalleretkW"] > PV_CAPACITY_THRESHOLD_KW)
+    ].copy()
 
 
     # ==================================================================
@@ -1068,171 +1167,6 @@ def main():
         df_ppm.index
     )
 
-    
-    # ------------------------------------------------------------------
-    # New CHP and Heat plant dataset
-    #
-    # Only plants connected to district heating (non-empty fv_net) are
-    # included. Conventional fuels are classified as CHP (power and
-    # heat capacity both > 0) or heat only. Solar thermal plants and
-    # electricity-driven heat sources are classified separately. Heat
-    # pumps use heat vent, air, or ground as their carrier, while
-    # resistive heaters use ac.
-    # ------------------------------------------------------------------
-    df_chp_heat = power_plants.loc[active_power_plants].copy()
-
-    # Only plants connected to a district heating network
-    df_chp_heat = df_chp_heat.loc[
-        df_chp_heat["fv_net"].notna()
-        & df_chp_heat["fv_net"].astype(str).str.strip().ne("")
-    ].copy()
-
-    df_chp_heat["vaerk_postnr"] = normalize_postcode(
-        df_chp_heat["vaerk_postnr"]
-    )
-
-    # Drop plants without a postcode, since a node cannot be assigned
-    df_chp_heat = df_chp_heat.loc[
-        df_chp_heat["vaerk_postnr"].notna()
-    ].copy()
-
-    df_chp_heat["node"] = df_chp_heat["vaerk_postnr"].map(
-        lambda p: postcode_to_zone(p)["node"] + " 0AC"
-    )
-
-    df_chp_heat["fuel_lower"] = (
-        df_chp_heat["Hovedbrændselsgruppe"]
-        .str.strip()
-        .str.lower()
-    )
-
-    df_chp_heat["tech_lower"] = (
-        df_chp_heat["anlaegstype_navn"]
-        .str.strip()
-        .str.lower()
-    )
-
-    def classify_electric_heat(fuel, tech):
-        """Return (carrier, set) for electric heat technologies, else None."""
-
-        if fuel == "elektricitet" and tech == "elpatron":
-            return ("ac", "resistive heater")
-
-        if "varmepumpe" in tech:
-            return ("air", "heat pump")
-            
-        return None
-
-    def classify_solar_thermal(fuel, tech):
-        """Return the carrier and set for solar thermal plants, else None."""
-
-        if fuel == "solenergi" or tech == "solvarme":
-            return ("solar thermal", "solar thermal")
-
-        return None
-
-    electric_heat = df_chp_heat.apply(
-        lambda row: classify_electric_heat(
-            row["fuel_lower"], row["tech_lower"]
-        ),
-        axis=1,
-    )
-    is_electric_heat = electric_heat.notna()
-
-    solar_thermal = df_chp_heat.apply(
-        lambda row: classify_solar_thermal(
-            row["fuel_lower"], row["tech_lower"]
-        ),
-        axis=1,
-    )
-    is_solar_thermal = solar_thermal.notna()
-
-    # Conventional fuels: classify as CHP or heat only
-    df_conventional = df_chp_heat.loc[
-        ~is_electric_heat & ~is_solar_thermal
-    ].copy()
-
-    df_conventional = df_conventional.loc[
-        df_conventional["varmekapacitet_MW"].fillna(0) > 0
-    ].copy()
-
-    df_conventional["carrier"] = (
-        df_conventional["fuel_lower"]
-        .map(FUELTYPE_MAPPING)
-        .map(CARRIER_MAPPING)
-        .replace("biogas", "solid biomass")
-    )
-
-    df_conventional["set"] = np.where(
-        (df_conventional["elkapacitet_MW"].fillna(0) > 0)
-        & (df_conventional["varmekapacitet_MW"].fillna(0) > 0),
-        "CHP",
-        "boiler",
-    )
-
-    # Heat pumps / resistive heaters: no separate power capacity
-    df_electric = df_chp_heat.loc[is_electric_heat].copy()
-
-    df_electric = df_electric.loc[
-        df_electric["varmekapacitet_MW"].fillna(0) > 0
-    ].copy()
-
-    electric_classification = electric_heat.loc[is_electric_heat]
-    df_electric["carrier"] = electric_classification.map(lambda x: x[0])
-    df_electric["set"] = electric_classification.map(lambda x: x[1])
-    df_electric["elkapacitet_MW"] = np.nan
-
-    # Solar thermal plants: heat capacity only
-    df_solar_thermal = df_chp_heat.loc[is_solar_thermal].copy()
-
-    df_solar_thermal = df_solar_thermal.loc[
-        df_solar_thermal["varmekapacitet_MW"].fillna(0) > 0
-    ].copy()
-
-    solar_thermal_classification = solar_thermal.loc[is_solar_thermal]
-    df_solar_thermal["carrier"] = solar_thermal_classification.map(
-        lambda x: x[0]
-    )
-    df_solar_thermal["set"] = solar_thermal_classification.map(
-        lambda x: x[1]
-    )
-    df_solar_thermal["elkapacitet_MW"] = np.nan
-
-    df_chp_heat = pd.concat(
-        [df_conventional, df_electric, df_solar_thermal],
-        ignore_index=True,
-    )
-
-    existing_chp_heat = (
-        df_chp_heat
-        .groupby(["node", "carrier", "set"], as_index=False)
-        .agg(
-            power_capacity=(
-                "elkapacitet_MW",
-                lambda s: s.sum(min_count=1),
-            ),
-            heating_capacity=("varmekapacitet_MW", "sum"),
-        )
-        .sort_values(["node", "carrier", "set"])
-        .reset_index(drop=True)
-    )
-
-    chp_heat_output_path = (
-        DATA_DIR
-        / "existing_chp_heat_capacitites.csv"
-    )
-
-    existing_chp_heat.to_csv(
-        chp_heat_output_path,
-        index=False,
-    )
-
-    print(
-        f"\nSaved CHP/heat dataset to: "
-        f"{chp_heat_output_path}"
-    )
-
-
     # ------------------------------------------------------------------
     # Save
     # ------------------------------------------------------------------
@@ -1252,6 +1186,13 @@ def main():
     print(
         f"\nSaved processed dataset to: "
         f"{output_path}"
+    )
+
+    compare_wind_solar_outputs(
+        wind_and_solar,
+        active_wind_solar,
+        output_path,
+        small_pv_output_path,
     )
 
 
