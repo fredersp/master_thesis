@@ -86,6 +86,9 @@ def postcode_to_coords(postcode):
         return {'longitude': np.nan, 'latitude': np.nan}
 
     postcode = str(postcode).strip().zfill(4)
+    if postcode == '9999':
+        return {'longitude': np.nan, 'latitude': np.nan}
+
     api_key = os.environ.get('ADDR_KEY', '').strip()
     if not api_key:
         raise RuntimeError(
