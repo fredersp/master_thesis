@@ -19,12 +19,13 @@ from shapely.geometry import shape
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / 'data'
 END_2025 = pd.Timestamp('2025-12-31')
-PV_CAPACITY_THRESHOLD_KW = 6
-DK1_SHARE_TARGET = 0.8
+PV_CAPACITY_THRESHOLD_KW = 6 # TODO: Find accurate value
+DK1_SHARE_TARGET = 0.8 # TODO: Find accurate value
 POSTCODE_API_URL = 'https://api.danskadresseapi.dk/dawa/postnumre'
 POSTCODE_REQUEST_DELAY = 0.3  # Stay below the Hobby limit of 5 requests/second.
 
 # ENS fuel and technology names mapped to PPM conventions.
+# TODO: Double-check the mapping
 FUELTYPE_MAPPING = {
     'olie': 'Oil',
     'naturgas': 'Natural Gas',
@@ -480,7 +481,7 @@ def main():
         .reset_index(drop=True)
     )
     small_pv_by_node['capacity'] /= 1000
-    small_pv_output_path = DATA_DIR / 'existing_small_pv_capacity.csv'
+    small_pv_output_path = DATA_DIR / 'existing_solar_rooftop_capacities.csv'
     small_pv_by_node.to_csv(small_pv_output_path, index=False)
     print(f'\nSaved small PV capacity dataset to: {small_pv_output_path}')
 
