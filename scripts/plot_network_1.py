@@ -15,7 +15,7 @@ import pypsa
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
-NETWORK_FILE = DATA_DIR / "networks" / "sector_dk_se_co2_100.nc"
+NETWORK_FILE = DATA_DIR / "networks" / "sector_dk_se_ost.nc"
 POWER_FILE = DATA_DIR / "powerplants.csv"
 HEAT_FILE = DATA_DIR / "existing_chp_heat_capacitites.csv"
 
